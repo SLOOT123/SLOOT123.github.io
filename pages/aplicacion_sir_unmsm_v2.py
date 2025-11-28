@@ -20,9 +20,11 @@ Versión: 3.2 (Visualización Profesional)
 
 import dash
 from dash import dcc, html, Input, Output, State, callback
+from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+import pandas as pd
 from scipy.integrate import odeint
 from dataclasses import dataclass
 from typing import Tuple, Dict, Callable, Optional
@@ -237,6 +239,7 @@ class GeneradorGraficos:
         - Mejor distribución de colores
         - Ejes más legibles
         - Animaciones en hover
+        - Marcador de pico de infección
         """
         # Etiquetas por defecto
         if etiquetas is None:
@@ -247,6 +250,11 @@ class GeneradorGraficos:
             }
         
         fig = go.Figure()
+
+        # Encontrar el pico de infectados para la anotación
+        idx_pico = np.argmax(I)
+        t_pico = t[idx_pico]
+        i_pico = I[idx_pico]
         
         # Traza S: Susceptibles (con área mejorada)
         fig.add_trace(go.Scatter(
@@ -313,6 +321,37 @@ class GeneradorGraficos:
             ),
             hoverlabel=dict(bgcolor=config.COLOR_R)
         ))
+
+        # Añadir marcador del pico
+        fig.add_trace(go.Scatter(
+            x=[t_pico], y=[i_pico],
+            mode='markers',
+            name='Pico de Infección',
+            marker=dict(
+                color='red',
+                size=12,
+                symbol='star',
+                line=dict(width=2, color='white')
+            ),
+            hoverinfo='skip'
+        ))
+
+        fig.add_annotation(
+            x=t_pico, y=i_pico,
+            text=f"Pico: {int(i_pico):,}",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=2,
+            arrowcolor="#475569",
+            ax=0,
+            ay=-40,
+            font=dict(size=12, color="#475569", family=config.FUENTE),
+            bgcolor="rgba(255, 255, 255, 0.8)",
+            bordercolor="#E2E8F0",
+            borderwidth=1,
+            borderpad=4
+        )
         
         # Configuración del layout mejorada
         fig.update_layout(
@@ -395,6 +434,76 @@ class GeneradorGraficos:
             mirror=False
         )
         
+        return fig
+    
+    @staticmethod
+    def crear_grafico_fase(S: np.ndarray,
+                          I: np.ndarray,
+                          titulo: str = "Plano de Fase (S vs I)") -> go.Figure:
+        """
+        Crea un gráfico de plano de fase (Susceptibles vs Infectados).
+        Útil para visualizar la trayectoria de la epidemia.
+        """
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            x=S, y=I,
+            mode='lines',
+            name='Trayectoria',
+            line=dict(
+                color=config.COLOR_TITULO,
+                width=3,
+                shape='spline'
+            ),
+            hovertemplate=(
+                '<b>Susceptibles</b>: %{x:.0f}<br>'
+                '<b>Infectados</b>: %{y:.0f}<br>'
+                '<extra></extra>'
+            )
+        ))
+
+        # Marcador de inicio
+        fig.add_trace(go.Scatter(
+            x=[S[0]], y=[I[0]],
+            mode='markers',
+            name='Inicio',
+            marker=dict(color='green', size=10, symbol='circle'),
+            showlegend=True
+        ))
+
+        # Marcador de fin
+        fig.add_trace(go.Scatter(
+            x=[S[-1]], y=[I[-1]],
+            mode='markers',
+            name='Fin',
+            marker=dict(color='red', size=10, symbol='x'),
+            showlegend=True
+        ))
+
+        fig.update_layout(
+            title=dict(
+                text=f'<b>{titulo}</b>',
+                font=dict(size=config.TAMAÑO_SUBTITULO, color=config.COLOR_TITULO)
+            ),
+            xaxis_title="Susceptibles (S)",
+            yaxis_title="Infectados (I)",
+            paper_bgcolor=config.COLOR_FONDO_PAPEL,
+            plot_bgcolor=config.COLOR_FONDO_GRAFICO,
+            font=dict(family=config.FUENTE),
+            margin=dict(l=60, r=40, t=80, b=60),
+            height=400,
+            showlegend=True,
+            legend=dict(
+                orientation='h',
+                yanchor='bottom',
+                y=1.02,
+                xanchor='right',
+                x=1
+            )
+        )
+        
+        fig.update_xaxes(autorange="reversed") # S disminuye con el tiempo
+
         return fig
     
     @staticmethod
@@ -708,7 +817,34 @@ def crear_layout_principal() -> html.Div:
                                                     }
                                                 }
                                             ),
-                                            html.Div(id='stats-influenza')
+                                            html.Div(id='stats-influenza'),
+                                            
+                                            # Nuevo: Gráfico de Fase
+                                            html.Div([
+                                                dcc.Graph(
+                                                    id='grafico-fase-influenza',
+                                                    style={'height': '400px'},
+                                                    config={'displayModeBar': False}
+                                                )
+                                            ], style={'marginTop': '30px'}),
+
+                                            # Nuevo: Botón de Descarga
+                                            html.Div([
+                                                html.Button("📥 Descargar Datos (CSV)", id="btn-download-influenza", 
+                                                           style={
+                                                               'backgroundColor': config.COLOR_TITULO,
+                                                               'color': 'white',
+                                                               'padding': '10px 20px',
+                                                               'border': 'none',
+                                                               'borderRadius': config.BORDER_RADIUS,
+                                                               'cursor': 'pointer',
+                                                               'fontSize': config.TAMAÑO_TEXTO,
+                                                               'fontWeight': '600',
+                                                               'marginTop': '20px',
+                                                               'width': '100%'
+                                                           }),
+                                                dcc.Download(id="download-dataframe-influenza")
+                                            ])
                                         ], style={'flex': '2', 'minWidth': '500px'})
                                     ], style={
                                         'display': 'flex',
@@ -936,7 +1072,8 @@ def crear_layout_principal() -> html.Div:
         'minHeight': '100vh',
         'margin': '0',
         'padding': '0'
-    })
+    }),
+    dcc.Store(id='store-page-init', data=False)  # Para rastrear inicialización
 
 
 # Asignar el layout (requerido para Dash multi-página)
@@ -948,7 +1085,8 @@ layout = crear_layout_principal()
 # ==========================================
 @callback(
     [Output('grafico-influenza', 'figure'),
-     Output('stats-influenza', 'children')],
+     Output('stats-influenza', 'children'),
+     Output('grafico-fase-influenza', 'figure')],
     [Input('input-n-flu', 'value'),
      Input('slider-b-flu', 'value'),
      Input('slider-k-flu', 'value')],
@@ -956,7 +1094,7 @@ layout = crear_layout_principal()
 )
 def actualizar_influenza(N: Optional[float],
                         beta: Optional[float],
-                        gamma: Optional[float]) -> Tuple[go.Figure, html.Div]:
+                        gamma: Optional[float]) -> Tuple[go.Figure, html.Div, go.Figure]:
     """
     Callback mejorado para actualización de simulación de influenza.
     """
@@ -983,11 +1121,11 @@ def actualizar_influenza(N: Optional[float],
         t, S, I, R = ModeloSIR.resolver(
             N, S0, I0, R0, 40,
             ModeloSIRClasico.ecuaciones,
-            beta, gamma
+            beta=beta, gamma=gamma
         )
         
         # Métricas mejoradas
-        metricas = CalculadoraMetricas.calcular_metricas_influenza(t, I)
+        metricas = CalculadoraMetricas.calcular_metricas_influenza(t, I, beta, gamma)
         
         # Gráfico mejorado
         fig = GeneradorGraficos.crear_grafico_sir(
@@ -997,6 +1135,9 @@ def actualizar_influenza(N: Optional[float],
             altura=500
         )
         
+        # Gráfico de Fase
+        fig_fase = GeneradorGraficos.crear_grafico_fase(S, I, "Plano de Fase: Influenza (S vs I)")
+        
         # Estadísticas mejoradas
         stats = GeneradorComponentesUI.crear_tarjeta_estadisticas(
             "📈 Métricas del Brote",
@@ -1004,22 +1145,64 @@ def actualizar_influenza(N: Optional[float],
                 'Pico de infectados': metricas['pico_valor'],
                 'Día del pico': metricas['pico_tiempo'],
                 'Infectados día 6': metricas['dia_6'],
-                'Impacto total': metricas['area_bajo_curva']
+                'Impacto total': metricas['area_bajo_curva'],
+                'R0 (Número Reproductivo Básico)': metricas.get('R0', 0)
             },
             config.COLOR_I
         )
         
-        return fig, stats
+        return fig, stats, fig_fase
         
     except ValueError as e:
         logger.warning(f"Error de validación en influenza: {str(e)}")
         fig_error = GeneradorGraficos.crear_grafico_error(f"Error de validación: {str(e)}")
-        return fig_error, html.Div()
+        return fig_error, html.Div(), fig_error
     
     except Exception as e:
         logger.error(f"Error inesperado en influenza: {str(e)}")
         fig_error = GeneradorGraficos.crear_grafico_error("Error inesperado en la simulación")
-        return fig_error, html.Div()
+        return fig_error, html.Div(), fig_error
+
+
+@callback(
+    Output("download-dataframe-influenza", "data"),
+    Input("btn-download-influenza", "n_clicks"),
+    [State('input-n-flu', 'value'),
+     State('slider-b-flu', 'value'),
+     State('slider-k-flu', 'value')],
+    prevent_initial_call=True
+)
+def descargar_influenza(n_clicks, N, beta, gamma):
+    """Callback para descargar datos de simulación."""
+    if not n_clicks:
+        return dash.no_update
+        
+    try:
+        N = int(N) if N and N > 0 else params.POBLACION_FLU
+        beta = float(beta) if beta and beta > 0 else params.TASA_TRANSMISION_FLU
+        gamma = float(gamma) if gamma and gamma > 0 else params.TASA_RECUPERACION_FLU
+        
+        I0, R0 = 1, 0
+        S0 = N - I0 - R0
+        
+        t, S, I, R = ModeloSIR.resolver(
+            N, S0, I0, R0, 40,
+            ModeloSIRClasico.ecuaciones,
+            beta=beta, gamma=gamma
+        )
+        
+        df = pd.DataFrame({
+            "Dia": t,
+            "Susceptibles": S,
+            "Infectados": I,
+            "Recuperados": R
+        })
+        
+        return dcc.send_data_frame(df.to_csv, "simulacion_influenza.csv")
+        
+    except Exception as e:
+        logger.error(f"Error en descarga: {e}")
+        return dash.no_update
 
 
 @callback(
@@ -1051,7 +1234,7 @@ def actualizar_rumor(beta: Optional[float],
         t, S, I, R = ModeloSIR.resolver(
             N, S0, I0, R0, 30,
             ModeloSIRRumor.ecuaciones,
-            beta, gamma
+            beta=beta, gamma=gamma
         )
         
         metricas = CalculadoraMetricas.calcular_metricas(t, I)
@@ -1102,7 +1285,7 @@ def actualizar_app(beta: Optional[float],
         t, S, I, R = ModeloSIR.resolver(
             N, S0, I0, R0, 180,  # Período más largo para app
             ModeloSIRClasico.ecuaciones,
-            beta, gamma
+            beta=beta, gamma=gamma
         )
         
         metricas = CalculadoraMetricas.calcular_metricas(t, I)
@@ -1155,10 +1338,17 @@ class CalculadoraMetricas:
             'pico_tiempo': float(t[pico_idx]),
             'area_bajo_curva': float(np.trapz(I, t))
         }
+
+    @staticmethod
+    def calcular_r0(beta: float, gamma: float) -> float:
+        """Calcula el Número Reproductivo Básico (R0)."""
+        return beta / gamma if gamma > 0 else 0.0
     
     @staticmethod
     def calcular_metricas_influenza(t: np.ndarray,
-                                   I: np.ndarray) -> Dict[str, float]:
+                                   I: np.ndarray,
+                                   beta: float = 0,
+                                   gamma: float = 0) -> Dict[str, float]:
         """Calcula métricas específicas para influenza."""
         metricas = CalculadoraMetricas.calcular_metricas(t, I)
         
@@ -1166,4 +1356,8 @@ class CalculadoraMetricas:
         día_6_idx = np.argmin(np.abs(t - 6))
         metricas['dia_6'] = float(I[día_6_idx])
         
+        if beta > 0 and gamma > 0:
+            metricas['R0'] = CalculadoraMetricas.calcular_r0(beta, gamma)
+        
         return metricas
+
