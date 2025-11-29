@@ -570,8 +570,7 @@ class GeneradorComponentesUI:
                 marks=marks,
                 tooltip={
                     "placement": "bottom", 
-                    "always_visible": True,
-                    "transform": f"function(value) {{return '{tooltip_prefix}' + value + '{tooltip_suffix}';}}"
+                    "always_visible": True
                 },
                 className="slider-profesional"
             )
